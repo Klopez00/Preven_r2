@@ -58,11 +58,11 @@ list.files()
 
 archivos <- list.files(pattern = "*.xlsx", full.names = TRUE)
 
-old_name_micro <- archivos[3]
+old_name_micro <- archivos[1]
 new_name_micro <- "CONSULTA.xlsx"
 file.rename(old_name_micro, new_name_micro)
 
-old_name_micro <- archivos[4]
+old_name_micro <- archivos[2]
 new_name_micro <- "MIKRO.xlsx"
 file.rename(old_name_micro, new_name_micro)
 
@@ -119,6 +119,8 @@ excel_1234 <- left_join(excel_1122, excel_3344, by = "peticion",  all.x=TRUE) %>
 
 # RECUPERACION DE CICS PERDIDOS--------------------------------------------------------------
 
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS")
+
 cic_perdidos <- read_excel("cic_clave-principal.xlsx") %>%
   #select(-cic) %>%                      #la segunda vez que corri esto tuve que eliminar la columna de cic
   #clean_names() %>%                     #he bloqueado todas estas filas porque las necesite cuando hice la extraccion
@@ -130,7 +132,6 @@ cic_perdidos <- read_excel("cic_clave-principal.xlsx") %>%
   #mutate(cic_real = row_number(), cic_inventado = row_number()) %>%
   #rename(fecha_nacimiento = fecha_de_nacimiento) %>%
   print()
-
 
 excel_union_1 <- excel_1234 %>%
   select(c(nombre,apellidos,cic,fecha_nacimiento)) %>%
@@ -156,6 +157,8 @@ union_2 <- left_join(excel_1234,cic_perdidos, by=c("nombre","apellidos","fecha_n
     cic = if_else(is.na(cic_inventado), cic, cic_inventado)) %>%
   print()
 
+
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS/OAS_DIARIO")
 
 # CREAR UN EXCEL PASO 2---------------------------------------------------------------------
 
@@ -275,6 +278,7 @@ addWorksheet(latorre_wb, "Sheet 1")
 
 ## set col widths-heights
 setColWidths(latorre_wb, "Sheet 1", cols = 1:100 , widths = 15)
+setColWidths(latorre_wb, "Sheet 1", cols = 9 , widths = 23.43)
 setRowHeights(latorre_wb, "Sheet 1", rows = 1:500, heights = 75)
 writeData(latorre_wb, sheet = 1, x = latorre)
 
@@ -288,6 +292,10 @@ addStyle(latorre_wb, sheet = 1, headerStyle, rows = 1, cols = 1:100, gridExpand 
 # cuerpo
 bodyStyle <- createStyle(border = c("top", "bottom", "left", "right"), borderColour = "#4F81BD", wrapText = TRUE)
 addStyle(latorre_wb, sheet = 1, bodyStyle, rows = 2:500, cols = 1:100, gridExpand = TRUE)
+
+access_style <- createStyle(fontSize = 8, border = c("top", "bottom", "left", "right"), borderColour = "#4F81BD", wrapText = TRUE)
+addStyle(latorre_wb, sheet = 1, access_style, rows = 2:500, cols = 9, gridExpand = TRUE)
+
 
 #DATA VALIDATION-----------------------------------------------------------------------------
 
