@@ -1,0 +1,285 @@
+
+
+#Bichos entre semana----------------------------------------------------------------
+
+
+#install.packages("pacman")
+library(pacman)
+
+pacman:: p_load(tidyverse,
+                googlesheets4,           #leer pase de guardia
+                gtsummary,               #hacer tablas
+                lubridate,               #editar fechas
+                flextable,               #edicion de tablas
+                ggplot2,
+                readxl,
+                devtools,                #para editar graficos
+                writexl,                 #exportar excel
+                janitor,                 #limpieza de datos avanzada
+                readxlsb,                #archivos de la torre
+                openxlsx,
+                skimr,
+                rio,
+                purrr,
+                RODBC   
+)
+
+
+#CONSEGUIR LA TABLA DE CENTINELA-----------------------------------------------------
+
+con <- odbcConnectAccess("//wx31166medpr010.elkarlan.euskadi.eus/Centinela/CENTINela.MDB")
+
+table_names <- sqlTables(con) %>% select(TABLE_NAME)
+
+
+vigilancia_tables <- table_names %>% 
+  filter(grepl("koldo", TABLE_NAME)) %>% 
+  unlist()
+
+centinela <- vigilancia_tables %>% 
+  set_names() %>% 
+  map(.f = ~ sqlFetch(channel = con,
+                      sqtable = .x)) %>% 
+  reduce(left_join, by="GlobalRecordID") 
+
+centi <- centinela %>% 
+  as_tibble() %>% 
+  clean_names() %>% 
+  arrange(cic)
+
+
+#DESCARGAR LOS DATOS DIARIOS-----------------------------------------------------
+
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS/OAS_DIARIO")
+getwd()
+list.files()
+
+# CAMBIAR LOS NOMBRES DE LOS ARCHIVOS 
+
+archivos <- list.files(pattern = "*.xlsx", full.names = TRUE)
+
+old_name_micro <- archivos[3]
+new_name_micro <- "CONSULTA.xlsx"
+file.rename(old_name_micro, new_name_micro)
+
+old_name_micro <- archivos[4]
+new_name_micro <- "MIKRO.xlsx"
+file.rename(old_name_micro, new_name_micro)
+
+# importar datos
+excel_1 <- read_excel("MIKRO.xlsx")
+excel_2 <- read_excel("CONSULTA.xlsx")
+excel_3 <- read.csv("OAS_MICRO.csv", header = TRUE, sep = "\t", fileEncoding = "utf16")
+excel_4 <- read.csv("Ingresos_HOSP_OAS_MICRO.csv", header = TRUE, sep = "\t", fileEncoding = "utf16")
+
+# limpieza de datos
+excel_11 <- excel_1 %>%
+  clean_names()
+
+excel_22 <- excel_2 %>%
+  clean_names() %>%
+  rename(
+    microorganismo = prueba,
+    marcador_resistencia = resultado
+  )
+
+excel_33 <- excel_3 %>%
+  clean_names() %>%
+  select(-fecha_extraccion_peticion)
+
+excel_44 <- excel_4 %>%
+  clean_names()  %>% 
+  
+  #quitar unos vestigiales que hay
+  filter(episodio_unico != "13781738") %>% 
+  filter(episodio_unico != "66757003") %>%
+  filter(episodio_unico != "68412581") %>%
+  filter(episodio_unico != "71623904") %>% 
+  
+  arrange(id_paciente, desc(hora_traslado))%>%
+  distinct(id_paciente, .keep_all = TRUE) %>% 
+  select(-c(episodio_unico, sub_episodio, hora_traslado, sexo))
+
+
+# joins
+excel_1122 <- rbind(excel_11,excel_22)
+
+excel_3344 <- left_join(excel_33,excel_44, by = "id_paciente") %>%
+  rename(
+    peticion = numero_peticion) %>%
+  select(-id_paciente) %>%
+  mutate(peticion = as.character(peticion))
+
+excel_1234 <- left_join(excel_1122, excel_3344, by = "peticion",  all.x=TRUE) %>%
+  rename(nombre = nombre_paciente,
+         apellidos = apellidos_paciente) %>% 
+  print()
+
+
+
+# RECUPERACION DE CICS PERDIDOS--------------------------------------------------------------
+
+cic_perdidos <- read_excel("cic_clave-principal.xlsx") %>%
+  #select(-cic) %>%                      #la segunda vez que corri esto tuve que eliminar la columna de cic
+  #clean_names() %>%                     #he bloqueado todas estas filas porque las necesite cuando hice la extraccion
+  #mutate(cic_inventado = cic) %>%
+  #rename(cic_real = cic) %>%
+  #filter(is.na(cic_inventado)) %>%
+  #arrange(no_ha_ca) %>%
+  #distinct() %>%
+  #mutate(cic_real = row_number(), cic_inventado = row_number()) %>%
+  #rename(fecha_nacimiento = fecha_de_nacimiento) %>%
+  print()
+
+
+excel_union_1 <- excel_1234 %>%
+  select(c(nombre,apellidos,cic,fecha_nacimiento)) %>%
+  distinct() %>%
+  print()
+
+
+# union para recuperar cic-s
+union_1 <- left_join(cic_perdidos, excel_union_1, by =c("nombre","apellidos","fecha_nacimiento"),all.x=TRUE) %>%
+  mutate(
+    cic = as.numeric(cic),
+    cic_real = as.numeric(cic_real),
+    cic_real = if_else(is.na(cic), cic_real, cic)) %>%
+  select(-cic) %>%
+  write.xlsx(file = "cic_clave-principal.xlsx")
+
+
+# union para pasar al documento de hoy los cic-s falsos
+union_2 <- left_join(excel_1234,cic_perdidos, by=c("nombre","apellidos","fecha_nacimiento"),all.x=TRUE) %>%
+  mutate(
+    cic = as.numeric(cic),
+    cic_real = as.numeric(cic_inventado),
+    cic = if_else(is.na(cic_inventado), cic, cic_inventado)) %>%
+  print()
+
+
+# CREAR UN EXCEL PASO 2---------------------------------------------------------------------
+
+latorre <-  union_2 %>%
+  mutate(
+    orden = if_else(is.na(fecha_ingreso), 1,0)) %>%
+  arrange(orden, microorganismo, marcador_resistencia, nombre) %>%
+  filter(microorganismo != "Coronavirus SARS-CoV-2 (ARN)") %>%
+  rename(
+    cama = habitacion,
+    ue = unidad_enfermeria_uenf,
+    servicio_micro = seccion_hosp,
+    habitacion = pto_atencion_pto_at) %>%
+  
+  mutate(
+    # genero las variables "manuales"
+    access = NA,
+    precauciones = NA,
+    tipo_nosocomial = NA,
+    #aislamiento = NA,
+    #volcado = NA,
+    
+    #editar las fechas
+    across(.cols = where(is.POSIXct), .fns = as.Date)) 
+
+
+
+#CONSULTA EN CENTINELA-----------------------------------------------------------------
+
+#mirar si esta el cic
+latorre$access <- latorre$cic %in% c(centi$cic)
+
+#crear un nuevo dataframe con solo los ultimos ingresos
+centi_ingreso <- centi %>% 
+  arrange(desc(fecha_de_ingreso)) %>% 
+  distinct(cic, germen, .keep_all = TRUE) %>% 
+  unite(new,cic,fecha_de_ingreso)
+
+#preparar una nueva variable en latorre
+latorre <- latorre %>% mutate(
+  cic2 = as.character(cic),
+  fecha_ingreso2 = as.character(fecha_ingreso)) %>% 
+  unite(new,cic2,fecha_ingreso2)
+
+#preguntarle si ese cic con esa fecha esta
+latorre$precauciones <- latorre$new %in% centi_ingreso$new
+
+#juntado con si estan aislados y sin final de aislamiento
+centi_aislados <- centi_ingreso %>%
+  filter(is.na(fecha_final_aisl)) %>% 
+  filter(aislamiento == "1") %>% 
+  unite(new2, new, aislamiento)
+
+latorre <- latorre %>% mutate(
+  x = "1",
+  cic2 = as.character(cic),
+  fecha_ingreso2 = as.character(fecha_ingreso)) %>% 
+  unite(new2 ,cic2, fecha_ingreso2, x)
+
+latorre$tipo_nosocomial <- latorre$new2 %in% centi_aislados$new2
+ 
+
+#AQUI CREAR LA VARIABLE FINAL TRAS LA CONSULTA---------------------------------------
+
+latorre <- latorre %>% 
+  mutate(
+    access = case_when(
+      access == "FALSE" ~ "El cic NO ESTA en centinela",
+      access == "TRUE" & precauciones == "FALSE" ~ "Esta en centi, pero es ingreso NUEVO",
+      access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "TRUE" ~ "En centi AHORA  tiene aislamientos activos",
+      access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "FALSE" ~ "En centi EN ESTE INGRESO NO tiene aislamientos activos"))
+
+
+
+#ORDENAR VARIABLES Y ULTIMOS DETALLES-------------------------------------------------
+
+   #aqui no pongo "orden" y ya desaparece
+latorre <- latorre %>% 
+  select("nombre", "apellidos", "fecha",
+         "muestra", "microorganismo", "marcador_resistencia", "servicio_micro", "habitacion",
+         "access", 
+         #"precauciones", 
+         #"tipo_nosocomial", 
+         #"aislamiento", "volcado",
+         #a partir de aquí las que no necesitamos
+         "cic","fecha_ingreso", "fecha_nacimiento" , "sexo",
+         "fecha_validacion", "servicio", "ue","servicio", "cama" ) %>% 
+  rename(
+    servicio_actual = servicio_micro,
+    cama_actual = habitacion,
+    fecha_muestra = fecha) %>% 
+  
+  mutate(
+    marcador_resistencia = if_else(marcador_resistencia == "FECHA", " ", marcador_resistencia),
+    cama = if_else(cama == "FECHA", " ", cama)
+  )
+
+
+
+
+
+##Create a new workbook-----------------------------------------------------------------
+latorre_wb <- createWorkbook()
+
+## Add a worksheet
+addWorksheet(latorre_wb, "Sheet 1")
+
+## set col widths-heights
+setColWidths(latorre_wb, "Sheet 1", cols = 1:100 , widths = 15)
+setRowHeights(latorre_wb, "Sheet 1", rows = 1:500, heights = 75)
+writeData(latorre_wb, sheet = 1, x = latorre)
+
+# header_nombres de columnas
+headerStyle <- createStyle(
+  fontSize = 10, fontColour = "#FFFFFF", halign = "center",
+  fgFill = "#4F81BD", border = "TopBottom", borderColour = "#4F81BD", wrapText = TRUE
+)
+addStyle(latorre_wb, sheet = 1, headerStyle, rows = 1, cols = 1:100, gridExpand = TRUE)
+
+# cuerpo
+bodyStyle <- createStyle(border = c("top", "bottom", "left", "right"), borderColour = "#4F81BD", wrapText = TRUE)
+addStyle(latorre_wb, sheet = 1, bodyStyle, rows = 2:500, cols = 1:100, gridExpand = TRUE)
+
+#DATA VALIDATION-----------------------------------------------------------------------------
+
+
+saveWorkbook(latorre_wb, "latorre.xlsx", overwrite = TRUE)
