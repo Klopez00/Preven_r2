@@ -1,6 +1,6 @@
 
 
-#Bichos entre semana----------------------------------------------------------------
+#PROBATURAS CON ACCESS----------------------------------------------------------------
 
 
 #install.packages("pacman")
@@ -207,7 +207,16 @@ latorre$precauciones <- latorre$new %in% centi_ingreso$new
 centi_aislados <- centi_ingreso %>%
   filter(is.na(fecha_final_aisl)) %>% 
   filter(aislamiento == "1") %>% 
-  unite(new2, new, aislamiento)
+  unite(new2, new, aislamiento) %>% 
+  
+  #todo esto son probaturas nuevas-----------------------------
+  select(c(new2,germen)) %>% 
+  mutate(germen_values = germen) %>% 
+  pivot_wider(names_from = germen, values_from = germen_values) %>% 
+  clean_names() %>% 
+  unite(aislamientos, "coronavirus_sars_cov_2":"mycobacterium_kansasii", sep = ", ", remove = T, na.rm = T)
+
+  #-----------------------------------------------------------
 
 latorre <- latorre %>% mutate(
   x = "1",
@@ -217,6 +226,7 @@ latorre <- latorre %>% mutate(
 
 latorre$tipo_nosocomial <- latorre$new2 %in% centi_aislados$new2
  
+latorre <- left_join(latorre, centi_aislados, by = "new2", all.X = T)
 
 #AQUI CREAR LA VARIABLE FINAL TRAS LA CONSULTA---------------------------------------
 
@@ -225,7 +235,7 @@ latorre <- latorre %>%
     access = case_when(
       access == "FALSE" ~ "El cic NO ESTA en centinela",
       access == "TRUE" & precauciones == "FALSE" ~ "Esta en centi, pero es ingreso NUEVO",
-      access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "TRUE" ~ "En centi AHORA  tiene aislamientos activos",
+      access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "TRUE" ~ as.character(aislamientos),
       access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "FALSE" ~ "En centi EN ESTE INGRESO NO tiene aislamientos activos"))
 
 
@@ -283,3 +293,4 @@ addStyle(latorre_wb, sheet = 1, bodyStyle, rows = 2:500, cols = 1:100, gridExpan
 
 
 saveWorkbook(latorre_wb, "latorre.xlsx", overwrite = TRUE)
+
