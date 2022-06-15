@@ -1,0 +1,163 @@
+---
+title: "UCI_enterobacter"
+output:
+  pdf_document: default
+  html_document: default
+date: '2022-05-30'
+---
+
+```{r setup, include=FALSE}
+
+
+
+#SCRIPT PARA enpidemia enterobacter, KOLDO Y JON_ANDER, MAYO 2022----------------------------------------------------
+
+
+#install.packages("pacman")
+library(pacman)
+
+pacman:: p_load(tidyverse,
+                googlesheets4,           #leer pase de guardia
+                gtsummary,               #hacer tablas
+                lubridate,               #editar fechas
+                flextable,               #edicion de tablas
+                ggplot2,
+                readxl,
+                devtools,                #para editar graficos
+                writexl,                 #exportar excel
+                janitor,                 #limpieza de datos avanzada
+                readxlsb,                #archivos de la torre
+                openxlsx,
+                skimr,
+                rio
+                #RDCOMClient             #VBA
+)
+
+setwd("S:/Medicina Preventiva/LÓPEZ-GURIDI-KOLDO/R/nueva_delis")
+getwd()
+list.files()
+
+
+#CARGAR DATOS--------------------------------------------------------------------------------------
+
+data <- import("Copia de CarbasB2022.xlsx") %>% 
+  clean_names() %>% 
+  as_tibble() 
+
+
+
+
+data_limpio <-  data %>% 
+  
+  #para quedarme con los que tienen enterobacter
+  filter(str_detect(microorganismo, "Enterobacter")) %>% 
+  
+  rename(
+    cic = no_sanitario,
+    cama = habitacion_cama,
+    genero = sexo
+  ) %>% 
+  
+  #quedarnos solo con 5A-B
+  filter(cama>499) %>% 
+  filter(cama<550) %>% 
+  
+  #edad numérica
+  separate(edad, into = c("edad", "x")) %>% 
+  select(-x) %>% 
+  
+  mutate(
+    edad_numeric = as.numeric(edad),
+    edad_categorias = case_when(
+      edad_numeric                      <= 29 ~ "0-29",
+      edad_numeric >= 30 & edad_numeric <= 39 ~ "30-39",
+      edad_numeric >= 40 & edad_numeric <= 49 ~ "40-49",
+      edad_numeric >= 50 & edad_numeric <= 59 ~ "50-59",
+      edad_numeric >= 60 & edad_numeric <= 69 ~ "60-69",
+      edad_numeric >= 70 & edad_numeric <= 79 ~ "70-79",
+      edad_numeric >= 80 ~ ">80",
+       ),
+    edad_categorias = factor(
+      edad_categorias,
+      level = c("0-29", "30-39", "40-49", "50-59","60-69","70-79",">80")),
+    
+    
+    
+    fecha = as.Date(fecha)) %>% 
+  
+  
+  #variables que me sobran
+  select(-c(peticion_no, prueba, procedencia, diagnostico, fecha_validacion)) %>% 
+  
+  #mas legible
+  mutate( 
+    marcadores_resistencia = case_when(
+      marcadores_resistencia == "PRODUCTOR DE CARBAPENEMASA DE CLASE A.,PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA)." ~ "Productor de carbapenemasa de clase A y B",
+      marcadores_resistencia == "PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA).,PRODUCTOR DE CARBAPENEMASA DE CLASE A." ~ "Productor de carbapenemasa de clase A y B",                                                
+      marcadores_resistencia == "PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA)." ~ "Productor de carbapenemasa de clase B",
+      marcadores_resistencia == "PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA).,PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA)." ~ "Productor de carbapenemasa de clase B",
+      marcadores_resistencia == "PRODUCTOR DE CARBAPENEMASA DE CLASE B (METALOBETALACTAMASA).,PRODUCTORA DE BETALACTAMASA PLÁSMIDICA TIPO AMPC." ~ "Productor de carbapenemasas de clase B y tipo AMPc"
+      )
+  ) %>% 
+  mutate(tipo_muestra = tolower(tipo_muestra),
+         tipo_muestra = str_to_title(tipo_muestra),
+         
+         servicio = tolower(servicio),
+         servicio = str_to_title(servicio)) %>% 
+  
+  #como quitar lo que viene después de parentesis
+  separate(servicio, into = c("servicio", "x"), sep = "\\(") %>% 
+  select(-x) %>% 
+  separate(tipo_muestra	, into = c("tipo_muestra", "x"), sep = "\\(") %>% 
+  select(-x) %>% 
+  
+  
+  #VAMOS A CONSIDERAR QUE TODOS SON CLOACAE COMPLEX
+  mutate( microorganismo = "Enterobacter cloacae complex") %>% 
+  distinct(cic, tipo_muestra, cama, .keep_all = TRUE)
+
+  
+ 
+
+#CREAR TABLAS DE LOCALIZACIONES--------------------------------------------------------------------------------------
+
+localizaciones <- data_limpio %>% 
+  select(paciente, cama, tipo_muestra) %>% 
+  pivot_wider(
+    names_from = tipo_muestra, values_from = cama)
+
+data_wide <- left_join(data_limpio, localizaciones, by = "paciente", all.x=TRUE)
+
+
+
+descriptiva <- data_limpio %>% 
+  select(-paciente,-cic, -edad,-microorganismo, -edad_numeric) %>%
+  tbl_summary() %>% 
+  bold_labels()
+
+
+
+
+#GRAFICO UNIFICADO DECILES/ QUINTALES--------------------------------------------------------------------------------
+
+graf_edad <- data_limpio %>% ggplot(aes(edad_categorias, fill = edad_categorias)) + 
+                geom_bar(show.legend=FALSE) 
+
+#graf genero  
+graf_genero <- data_limpio %>% ggplot(aes(genero, fill = genero)) + 
+  geom_bar()
+
+
+
+
+```
+
+
+```{r, echo=FALSE}
+graf_edad
+
+graf_genero
+
+descriptiva
+
+```
