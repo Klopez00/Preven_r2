@@ -1,4 +1,48 @@
 
+
+```{r}
+
+nosocomiales <- h_4 %>%
+  mutate(planta2 = planta,
+         planta = unlist(planta),
+         planta = as.factor(planta)) %>% 
+  mutate(planta2 = as.numeric(str_extract(planta2, "[0-9]+"))) %>% 
+ # mutate(planta2 = as.numeric(planta2)) %>% 
+  filter(planta2 == 1) %>% 
+  drop_na(cic)
+
+
+nosocomiales %>% count(planta, mes_pdia) %>%
+  group_by(planta) %>% 
+  ggplot(mapping = aes(x = mes_pdia)) +
+  geom_line(stat = "count")
+
+
+ggplot( data = nosocomiales) +
+  geom_bar(
+    mapping = aes(x = mes_pdia, fill = planta, color = planta),
+    position = "dodge"
+  )
+  
+  
+  
+
+
+view(nosocomiales)
+
+c <- c1 %>% count(indicadores, semana_pdia) %>% 
+  complete(indicadores, semana_pdia, fill = list (n=0)) %>% 
+  ggplot(aes(x=semana_pdia, y=n, group = indicadores, color=indicadores)) + 
+  geom_smooth(size=0.8, stat = "identity")+
+    theme_bw() +
+  xlab("Semana") + 
+  ylab("Nº de casos") +
+  labs(color="Indicadores", title = paste("Evolución de indicadores de interés")) +
+  scale_x_discrete() +
+  scale_y_continuous(limits = c(0,30)) +
+  theme(axis.text.x = element_text(angle=0))+
+  geom_point(size=2.5)
+```
 ```{r}
 h <- b1 %>%
   drop_na(cic) %>%  
