@@ -1,7 +1,19 @@
+---
+title: "Preparar_bichos"
+output: html_document
+date: '2022-06-14'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 
 
-#PROBATURAS CON ACCESS----------------------------------------------------------------
+#POSIBLES FALLOS-------------------------------------
 
+#FILA 235 APROX: UNITE DE LOS BICHOS
+
+
+#----------------------------------------------------
 
 #install.packages("pacman")
 library(pacman)
@@ -50,7 +62,7 @@ centi <- centinela %>%
 
 #DESCARGAR LOS DATOS DIARIOS-----------------------------------------------------
 
-setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS/OAS_DIARIO")
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS_DIARIO")
 getwd()
 list.files()
 
@@ -119,7 +131,7 @@ excel_1234 <- left_join(excel_1122, excel_3344, by = "peticion",  all.x=TRUE) %>
 
 # RECUPERACION DE CICS PERDIDOS--------------------------------------------------------------
 
-setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS")
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS")
 
 cic_perdidos <- read_excel("cic_clave-principal.xlsx") %>%
   #select(-cic) %>%                      #la segunda vez que corri esto tuve que eliminar la columna de cic
@@ -132,6 +144,8 @@ cic_perdidos <- read_excel("cic_clave-principal.xlsx") %>%
   #mutate(cic_real = row_number(), cic_inventado = row_number()) %>%
   #rename(fecha_nacimiento = fecha_de_nacimiento) %>%
   print()
+
+
 
 excel_union_1 <- excel_1234 %>%
   select(c(nombre,apellidos,cic,fecha_nacimiento)) %>%
@@ -157,8 +171,7 @@ union_2 <- left_join(excel_1234,cic_perdidos, by=c("nombre","apellidos","fecha_n
     cic = if_else(is.na(cic_inventado), cic, cic_inventado)) %>%
   print()
 
-
-setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCIÓN AISLAMIENTOS/OAS_DIARIO")
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS_DIARIO")
 
 # CREAR UN EXCEL PASO 2---------------------------------------------------------------------
 
@@ -217,7 +230,7 @@ centi_aislados <- centi_ingreso %>%
   mutate(germen_values = germen) %>% 
   pivot_wider(names_from = germen, values_from = germen_values) %>% 
   clean_names() %>% 
-  unite(aislamientos, "coronavirus_sars_cov_2":"mycobacterium_kansasii", sep = ", ", remove = T, na.rm = T)
+  unite(aislamientos, "coronavirus_sars_cov_2":"parainfluenza_1", sep = ", ", remove = T, na.rm = T)
 
   #-----------------------------------------------------------
 
@@ -301,4 +314,4 @@ addStyle(latorre_wb, sheet = 1, access_style, rows = 2:500, cols = 9, gridExpand
 
 
 saveWorkbook(latorre_wb, "latorre.xlsx", overwrite = TRUE)
-
+```
