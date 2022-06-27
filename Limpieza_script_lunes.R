@@ -220,13 +220,13 @@ centi_aislados <- centi_ingreso %>%
   unite(new2, new, aislamiento) %>% 
   
   #todo esto son probaturas nuevas-----------------------------
-select(c(new2,germen)) %>% 
+  select(c(new2,germen)) %>% 
   mutate(germen_values = germen) %>% 
   pivot_wider(names_from = germen, values_from = germen_values) %>% 
   clean_names() %>% 
-  unite(aislamientos, "coronavirus_sars_cov_2":"mycobacterium_kansasii", sep = ", ", remove = T, na.rm = T)
+  unite(aislamientos, "coronavirus_sars_cov_2":"parainfluenza_1", sep = ", ", remove = T, na.rm = T)
 
-#-----------------------------------------------------------
+  #-----------------------------------------------------------
 
 latorre <- latorre %>% mutate(
   x = "1",
@@ -235,7 +235,7 @@ latorre <- latorre %>% mutate(
   unite(new2 ,cic2, fecha_ingreso2, x)
 
 latorre$tipo_nosocomial <- latorre$new2 %in% centi_aislados$new2
-
+ 
 latorre <- left_join(latorre, centi_aislados, by = "new2", all.X = T)
 
 #AQUI CREAR LA VARIABLE FINAL TRAS LA CONSULTA---------------------------------------
@@ -249,9 +249,10 @@ latorre <- latorre %>%
       access == "TRUE" & precauciones == "TRUE" & tipo_nosocomial == "FALSE" ~ "En centi EN ESTE INGRESO NO tiene aislamientos activos"))
 
 
+
 #ORDENAR VARIABLES Y ULTIMOS DETALLES-------------------------------------------------
 
-#aqui no pongo "orden" y ya desaparece
+   #aqui no pongo "orden" y ya desaparece
 latorre <- latorre %>% 
   select("nombre", "apellidos", "fecha",
          "muestra", "microorganismo", "marcador_resistencia", "servicio_micro", "habitacion",
@@ -259,7 +260,7 @@ latorre <- latorre %>%
          #"precauciones", 
          #"tipo_nosocomial", 
          #"aislamiento", "volcado",
-         #a partir de aquí las que no necesitamos
+         #a partir de aquÃ­ las que no necesitamos
          "cic","fecha_ingreso", "fecha_nacimiento" , "sexo",
          "fecha_validacion", "servicio", "ue","servicio", "cama" ) %>% 
   rename(
@@ -270,7 +271,7 @@ latorre <- latorre %>%
   mutate(
     marcador_resistencia = if_else(marcador_resistencia == "FECHA", " ", marcador_resistencia),
     cama = if_else(cama == "FECHA", " ", cama)
-  )%>% 
+  ) %>% 
   distinct(cic, microorganismo, marcador_resistencia, .keep_all = T)
 
 
@@ -285,6 +286,7 @@ addWorksheet(latorre_wb, "Sheet 1")
 
 ## set col widths-heights
 setColWidths(latorre_wb, "Sheet 1", cols = 1:100 , widths = 15)
+setColWidths(latorre_wb, "Sheet 1", cols = 9 , widths = 23.43)
 setRowHeights(latorre_wb, "Sheet 1", rows = 1:500, heights = 75)
 writeData(latorre_wb, sheet = 1, x = latorre)
 
@@ -298,6 +300,10 @@ addStyle(latorre_wb, sheet = 1, headerStyle, rows = 1, cols = 1:100, gridExpand 
 # cuerpo
 bodyStyle <- createStyle(border = c("top", "bottom", "left", "right"), borderColour = "#4F81BD", wrapText = TRUE)
 addStyle(latorre_wb, sheet = 1, bodyStyle, rows = 2:500, cols = 1:100, gridExpand = TRUE)
+
+access_style <- createStyle(fontSize = 8, border = c("top", "bottom", "left", "right"), borderColour = "#4F81BD", wrapText = TRUE)
+addStyle(latorre_wb, sheet = 1, access_style, rows = 2:500, cols = 9, gridExpand = TRUE)
+
 
 #DATA VALIDATION-----------------------------------------------------------------------------
 
