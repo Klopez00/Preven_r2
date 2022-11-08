@@ -1,0 +1,1101 @@
+---
+title: "Informe semanal automatizado sobre microoganismos de interes"
+author: "Medicina Preventiva HUC"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    toc_depth: 3
+    number_sections: true
+    theme: lumen
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE, warning=FALSE}
+#SCRIPT PARA informe de centinela, JUNIO 2022---------------------------------
+
+library(pacman)
+library(tidyverse)
+library(gtsummary)
+library(lubridate)
+library(flextable)
+library(ggplot2)
+library(readxl)
+library(writexl)
+library(janitor)
+library(readxlsb)
+library(openxlsx)
+library(skimr)
+library(rio)
+library(purrr)
+library(RODBC)
+library(gt)
+#library(ggpubr)
+#library(kableExtra)
+library(knitr)
+#library(devtools)
+library(jpeg)
+library(ggpubr)
+library(DT)
+
+gt_tabla <- function(tbl){
+   tbl %>% 
+    gt()%>% 
+  #añadir bordes
+  tab_style(
+   style =  cell_borders(
+      sides = c("left", "right", "top", "bottom"),
+      color = "black",
+      style = "solid"),
+   locations = cells_body(
+     columns = everything())) %>% 
+  #enfatizar las titulos
+  tab_style(
+    locations = cells_column_labels(columns = everything()),
+    style     = list(
+      #Give a thick border below
+      cell_borders(sides = "bottom", weight = px(3)),
+      #Make text bold
+      cell_text(weight = "bold"))) %>% 
+  opt_table_font(
+        font = list(
+          google_font("Chivo"),
+          default_fonts()
+        )
+      ) 
+}
+
+'%ni%' <- Negate("%in%")
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+#CAMBIOS MANUALES
+# poner el primer dia de la semana a analizar
+l_1 <- Sys.Date() - weeks(2) 
+
+limite <- floor_date(l_1,
+                     unit = "week",
+                     week_start = 1) - 6 
+
+#limite <- "2022-06-05"-----------por si se quiere ponerla semana  manualmente
+
+#CARGAR DATOS------------------------------------------------------------------------------------
+
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS")
+
+con <- odbcConnectAccess("S:/Medicina Preventiva/CENTINELA/CENTINela.MDB")
+
+table_names <- sqlTables(con) %>% select(TABLE_NAME)
+
+
+vigilancia_tables <- table_names %>% 
+  filter(grepl("koldo", TABLE_NAME)) %>% 
+  unlist()
+
+data <- vigilancia_tables %>% 
+  set_names() %>% 
+  map(.f = ~ sqlFetch(channel = con,
+                      sqtable = .x)) %>% 
+  reduce(left_join, by = "GlobalRecordID") %>% 
+  clean_names() %>% 
+  as_tibble()
+
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+
+# ME QUEDO CON LOS DE LA SEMANA ANTERIOR--------------------------------------------------------
+data_limpio <-  data %>% 
+  
+  mutate(
+    across(.cols = where(is.POSIXct), .fns = as.Date),
+    
+    edad = ((Sys.Date()- fecha_de_nacimiento)/365),
+    edad_numeric = as.numeric(edad),
+    edad_categorias = case_when(
+      edad_numeric                      <  10  ~ "00-09",
+      edad_numeric > 9 & edad_numeric < 20 ~ "10-19",
+      edad_numeric > 19 & edad_numeric < 30 ~ "20-29",
+      edad_numeric > 29 & edad_numeric < 40 ~ "30-39",
+      edad_numeric > 39 & edad_numeric < 50 ~ "40-49",
+      edad_numeric > 49 & edad_numeric < 60 ~ "50-59",
+      edad_numeric > 59 & edad_numeric < 70 ~ "60-69",
+      edad_numeric > 69 & edad_numeric < 80 ~ "70-79",
+      edad_numeric > 79 & edad_numeric < 90 ~ "80-89",
+      edad_numeric > 89 ~ ">90"),
+    
+    edad_categorias = factor(
+      edad_categorias,
+      level = c("00-09", "10-19", "20-29",
+                "30-39", "40-49", "50-59",
+                "60-69","70-79", "80-89",
+                ">90")),
+    
+    
+    #variables utiles: semana_nuevos y con LETRAS, AUTOMATICO-----------
+    
+    semana_nuevos = floor_date(fecha_inicio_aisl,
+                               unit = "week",
+                               week_start = 1),
+    
+    
+    semana_nuevos_letras = floor_date(fecha_inicio_aisl,
+                            unit = "week",
+                            week_start = 1),
+      
+      
+      
+    semana_nuevos_letras_2 = floor_date(fecha_inicio_aisl,
+                            unit = "week",
+                            week_start = 1) + 6,
+      
+    semana_nuevos_letras = format( semana_nuevos_letras, "%d%b"),
+    semana_nuevos_letras_2 = format( semana_nuevos_letras_2, "%d%b")) %>% 
+    unite(col = "semana_nuevos_letras", c("semana_nuevos_letras", "semana_nuevos_letras_2"), sep = "/ ", remove = T) %>% 
+     
+  
+  #----------------------------  
+    mutate(   
+    
+    semana_final_aislamiento = floor_date(fecha_final_aisl,
+                                          unit = "week",
+                                          week_start = 1),
+    
+    dias_ingreso_registro =    fecha_registro    - fecha_de_ingreso,
+    dias_ingreso_aislamiento = fecha_inicio_aisl - fecha_de_ingreso,
+    
+    #legibilidad
+    
+    #germen = tolower(germen),
+    #germen = str_to_title(germen),
+    
+    germen = str_to_sentence(germen),
+    germen = str_replace(germen, "blea", "BLEE"),
+    germen = str_replace(germen, "blee", "BLEE"),
+    germen = str_replace(germen, "Sarm", "SARM"),
+    germen = str_replace(germen, "tbc", "TBC"),
+    germen = str_replace(germen, "Coli", "coli"),
+    germen = str_replace(germen, "ampc", "AMPc"),
+    germen = str_replace(germen, "carbapenemasas", "Carbapenemasas"),
+    germen = str_replace(germen, "multir", "MultiR"),
+    germen = str_replace(germen, "Serratia marscences", "Serratia marcescens"),
+    germen = str_replace(germen, "Clostridium dificile", "Clostridium difficile"),
+    germen = str_replace(germen, "Klebsiela", "Klebsiella"),
+    germen = str_replace(germen, "pneumonia ", "pneumoniae "),
+    
+   
+    
+     germen = str_replace(germen, "Sarm", "SARM"),
+    
+    
+    
+    precauciones = tolower(precauciones),
+    precauciones = str_to_title(precauciones),
+    
+    sexo = case_when(
+      sexo == 0 ~ "Hombre",
+      sexo == 1 ~ "Mujer"),
+    
+    tipo  = case_when(
+      tipo == 1 ~ "Nosocomial",
+      tipo == 2 ~ "Comunitaria",
+      tipo == 3 ~ "Reingreso nosocomial",
+      tipo == 4 ~ "Incierto",
+      tipo == 5 ~ "Reingreso comunitaria",
+      tipo == 6 ~ "Asociada a cuidados"),
+    
+    id_procedencia = case_when(
+      id_procedencia ==    1  ~	"ANESTESIA REANIMACIÓN",
+      id_procedencia ==    2  ~	"C. INF. SECCIÓN ORTOPEDIA",
+      id_procedencia ==    3  ~	"C.INF. SECCIÓN UROLÓGIA",
+      id_procedencia ==    4  ~	"C. CARDIACA",
+      id_procedencia ==    5  ~	"C.GENERAL A",
+      id_procedencia ==    6  ~	"C. GENERAL B",
+      id_procedencia ==    7  ~	"C. INF. SECCIÓN A",
+      id_procedencia ==    8  ~	"C. INF. SECCIÓN B",
+      id_procedencia ==    9  ~	"C. INF. SECCIÓN C",
+      id_procedencia ==    10 ~	"C. INF. SECCIÓN ORL",
+      id_procedencia ==    11 ~ "C. MAXILOFACIAL",
+      id_procedencia ==    12 ~	"C. PLÁSTICA",
+      id_procedencia ==    13 ~	"C. PLÁSTICA - G. QUEMADOS",
+      id_procedencia ==    14 ~	"C. TORÁCICA",
+      id_procedencia ==    15 ~	"C. VASCULAR",
+      id_procedencia ==    16 ~	"CARDIOLOGÍA",
+      id_procedencia ==    17 ~	"CARDIOLOGÍA INFANTIL",
+      id_procedencia ==    18 ~	"ENDOCRINOLOGÍA",
+      id_procedencia ==    19 ~	"GASTROENTEROLOGÍA",
+      id_procedencia ==    20 ~	"GINECOLOGÍA",
+      id_procedencia ==    21 ~	"GINECOLOGÍA - ONCOLOGÍA",
+      id_procedencia ==    22 ~	"HEMATOLOGÍA",
+      id_procedencia ==    23 ~	"M. INTERNA",
+      id_procedencia ==    24 ~	"M. INTENSIVA",
+      id_procedencia ==    25 ~	"NEFROLOGÍA",
+      id_procedencia ==    26	~"NEFROLOGÍA INFANTIL",
+      id_procedencia ==    27 ~	"NEUMOLOGÍA",
+      id_procedencia ==    28 ~	"NEUROCIRUGÍA",
+      id_procedencia ==    29 ~	"NEUROLOGÍA",
+      id_procedencia ==    30	~"NEUROPEDIATRÍA",
+      id_procedencia ==    31 ~	"O.R.L.",
+      id_procedencia ==    32 ~	"OBSTETRICIA",
+      id_procedencia ==    33 ~	"OFTALMOLOGÍA",
+      id_procedencia ==    34 ~	"ONCOLOGÍA INFANTIL",
+      id_procedencia ==    35 ~	"ONCOLOGÍA MÉDICA",
+      id_procedencia ==    36 ~	"ONCOLOGÍA RADIOTERÁPICA",
+      id_procedencia ==    37 ~	"PEDIATRÍA CUIDADOS INTENSIVOS",
+      id_procedencia ==    38 ~	"PEDIATRÍA GENERAL",
+      id_procedencia ==    39 ~	"PSIQUIATRÍA",
+      id_procedencia ==    40	~ "PSIQUIATRÍA INFANTIL",
+      id_procedencia ==    41 ~	"REHABILITACIÓN",
+      id_procedencia ==    42	~ "REUMATOLOGÍA",
+      id_procedencia ==    43	~ "TRAUMATOLOGÍA",
+      id_procedencia ==    44	~ "U. ENF. INFECCIOSAS",
+      id_procedencia ==    45	~ "UNIDAD CORONARIA",
+      id_procedencia ==    46	~ "UNIDAD NEONATAL",
+      id_procedencia ==    47 ~	"UROLOGÍA",
+      id_procedencia ==    48	~ "U.C.HEPATICA",
+      id_procedencia ==    49	~ "URGENCIAS MEDICO-QUIRURGICAS",
+      id_procedencia ==    50 ~	"EXTRAHOSPITALARIO",
+      id_procedencia ==    51 ~	"HOSPITALARIO",
+      id_procedencia ==    52 ~	"REINGRHOSPITALARIO",
+      id_procedencia ==    53 ~	"REINGREXTRAHOSPITALARIO"))%>% 
+      
+  mutate_if(is.numeric, round, digits=0) %>% 
+  
+  #quitamos covid que genera ruido
+    filter(
+           germen != "Coronavirus sars-cov-2" &
+           germen != "Coronavirus ciclos tardíos" & 
+           germen != "Coronavirus contacto estrecho" & 
+           germen != "Adenovirus" &
+           germen != "Astrovirus" &
+           germen != "Bocavirus" &
+           germen != "Coronavirus" &
+           germen != "Coxsackie" &
+           germen != "Echovirus" &
+           germen != "Enterovirus" &
+           germen != "Herpes simplex I" &
+           germen != "Herpes simplex Ii" &
+           germen != "Herpes zoster" &
+           germen != "Metapneumovirus" &
+           germen != "Monkeypox" &
+           germen != "Norovirus"&  
+           germen != "Parechovirus"&
+           germen != "Parvovirus b19"&
+           germen != "Rabia virus"&
+           germen != "Rhinovirus"&
+           germen != "Rotavirus"&
+           germen != "Varicela-zoster") %>% 
+  
+  filter(!grepl("Influenza|Parainfluenza|Virus|Vrs", germen)) %>% 
+         #germen != "Influenza A" |
+         #germen !=  grepl("Parainfluenza", germen) |
+         #germen !grepl("Virus", germen) |
+         #germen !=  grepl("Vrs", germen)) %>% 
+  
+  select(-c(orden, edad, fecha_de_nacimiento, no_ha_ca, conexion)) %>% 
+  arrange(germen) %>% 
+  mutate(fecha_germen_copia = fecha_germen - 4,
+  
+  #donde colonizo
+    
+    #across(starts_with("fechab"), as.Date, ~ . - 1),
+         habitacion_muestra = case_when(
+           #is.na(idhab2)                                                     ~ as.character(id_habitacion,
+           
+           fecha_germen >= fechab  ~ as.character(id_habitacion),
+           
+           fecha_germen < fechab  & fecha_germen >= fechab2 & !is.na(idhab2) ~ as.character(idhab2),
+           fecha_germen < fechab  & fecha_germen >= fechab2 & is.na(idhab2) ~ as.character(id_habitacion),
+           
+           
+           fecha_germen < fechab2  & fecha_germen >= fechab3 & !is.na(idhab3) ~ as.character(idhab3),
+           fecha_germen < fechab2  & fecha_germen >= fechab3 & is.na(idhab3) & !is.na(idhab2) ~ as.character(idhab2),
+           fecha_germen < fechab2  & fecha_germen >= fechab3 & is.na(idhab3) & is.na(idhab2) ~ as.character(id_habitacion),
+           
+           fecha_germen < fechab3  & fecha_germen >= fechab4 & !is.na(idhab4) ~ as.character(idhab4),
+           fecha_germen < fechab3  & fecha_germen >= fechab4 & is.na(idhab4) & !is.na(idhab3) ~ as.character(idhab3),
+           fecha_germen < fechab3  & fecha_germen >= fechab4 & is.na(idhab4) & is.na(idhab3) & !is.na(idhab2) ~ as.character(idhab2),
+           fecha_germen < fechab3  & fecha_germen >= fechab4 & is.na(idhab4) & is.na(idhab3) &  is.na(idhab2) ~ as.character(id_habitacion),
+           
+           fecha_germen < fechab4  & fecha_germen >= fechab5 & !is.na(idhab5) ~ as.character(idhab5),
+           fecha_germen < fechab4  & fecha_germen >= fechab5 & is.na(idhab5) & !is.na(idhab4) ~ as.character(idhab4),
+           fecha_germen < fechab4  & fecha_germen >= fechab5 & is.na(idhab5) & is.na(idhab4) & !is.na(idhab3) ~ as.character(idhab3),
+           fecha_germen < fechab4  & fecha_germen >= fechab5 & is.na(idhab5) & is.na(idhab4) &  is.na(idhab3) &  !is.na(idhab2) ~ as.character(idhab2),
+           fecha_germen < fechab4  & fecha_germen >= fechab5 & is.na(idhab5) & is.na(idhab4) &  is.na(idhab3) &  is.na(idhab2) ~ as.character(id_habitacion),
+           
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & !is.na(idhab6) ~ as.character(idhab6),
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & is.na(idhab6) & !is.na(idhab5) ~ as.character(idhab5),
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & is.na(idhab6) & is.na(idhab5) & !is.na(idhab4) ~ as.character(idhab4),
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & is.na(idhab6) & is.na(idhab5) &  is.na(idhab4) &  !is.na(idhab3) ~ as.character(idhab3),
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & is.na(idhab6) & is.na(idhab5) &  is.na(idhab4) &  is.na(idhab3) &  !is.na(idhab2) ~ as.character(idhab2),
+           fecha_germen < fechab5  & fecha_germen >= fechab4 & is.na(idhab6) & is.na(idhab5) &  is.na(idhab4) &  is.na(idhab3) &  is.na(idhab2)  ~ as.character(id_habitacion),
+           
+           T ~ as.character(id_habitacion)
+           ),
+
+#LIMPIEZA DE LAS HABITACIONES
+  
+    habitacion_muestra_copia = habitacion_muestra,
+    habitacion_muestra = gsub(pattern = "-", replacement = ".", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = ",", replacement = ".", habitacion_muestra, fixed = TRUE),
+    
+    
+    #las Ts son 33
+    habitacion_muestra = gsub(pattern = "N", replacement = "22", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = "C", replacement = "12", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = "T", replacement = "33", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = "M", replacement = "11", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = "H", replacement = "14", habitacion_muestra, fixed = TRUE),
+    
+    #esto para las camas de la 650
+    habitacion_muestra = gsub(pattern = "A", replacement = "12", habitacion_muestra, fixed = TRUE),
+    habitacion_muestra = gsub(pattern = "B", replacement = "12", habitacion_muestra, fixed = TRUE),
+    
+    #y aqui ya lo convierto en numerico
+    habitacion_muestra_planta = as.numeric(habitacion_muestra),
+    
+    
+  habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68012, 680, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68112, 681, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68212, 682, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68312, 683, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68412, 684, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68512, 685, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68612, 686, habitacion_muestra_planta),
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 68712, 687, habitacion_muestra_planta),
+   
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 65412, 654, habitacion_muestra_planta),
+   
+   
+   habitacion_muestra_planta = if_else( habitacion_muestra_planta == 67612, 676, habitacion_muestra_planta)) %>% 
+   
+    #id_habitacion_planta = if_else(id_habitacion_planta > 70000, 0 , id_habitacion_planta)) %>% 
+   
+  
+  #nombres de plantas
+  mutate(
+    cama = as.numeric(habitacion_muestra_planta),
+    planta = case_when(
+      cama > 99  & cama <121 ~ "1A",
+      #las Ms
+      cama > 1099  & cama <1150 ~ "1A",
+      cama > 120 & cama <150 ~ "1B",
+      #las Hs
+      cama > 1399  & cama <1499 ~ "1A",
+      cama > 149 & cama <175 ~ "1D",
+      cama > 174 & cama <200 ~ "1E",
+      cama > 199 & cama <221 ~ "2A",
+      #las Ns
+      cama > 2199  & cama <2250 ~ "2A",
+      
+      cama > 220 & cama <250 ~ "2B",
+      cama > 249 & cama <275 ~ "2D",
+      cama > 274 & cama <300 ~ "2E",
+      cama > 299 & cama <322 ~ "3A",
+      #las Ts
+      cama > 3299  & cama <3350 ~ "3A",
+      cama > 321 & cama <350 ~ "3B",
+      cama > 349 & cama <375 ~ "3D",
+      cama > 374 & cama <400 ~ "3E",
+      cama > 399 & cama <425 ~ "4A",
+      cama > 424 & cama <450 ~ "4B",
+      cama > 449 & cama <475 ~ "4D",
+      cama > 474 & cama <500 ~ "4E",
+      
+      
+      cama > 499 & cama <512 ~ "Pasillo",
+      cama > 511 & cama <517 ~ "GQx",
+      cama > 520 & cama <535 ~ "UCI",
+      
+      cama > 534 & cama <549 ~ "Coro",
+      #cama > 545 & cama <549 ~ "UCI",
+      cama > 550 & cama <557 ~ "marti",
+      cama > 549 & cama <575 ~ "5D",
+      cama > 574 & cama <600 ~ "5E",
+      
+      
+      cama > 600 & cama <614 ~ "R1",
+      cama > 613 & cama <625 ~ "R2",
+      cama > 633 & cama <642 ~ "RA",
+      
+      cama > 624 & cama <650 ~ "6B",
+      cama > 649 & cama <675 ~ "6D",
+      cama > 674 & cama <700 ~ "6E",
+      cama > 699 & cama <750 ~ "7",
+      cama > 1199 & cama <1250 ~ "12")) %>% 
+  
+  mutate(planta_bubble = case_when(
+                                   planta == "12" ~ "12C",
+                                   planta == "7" ~ "7C",
+                                   planta == "UCI" ~ "6B",
+                                   planta == "RA" ~ "6A",
+                                   planta == "R1" ~ "6A",
+                                   planta == "R2" ~ "6A",
+                                   planta == "marti" ~ "5B",
+                                   planta == "GQx" ~ "5B",
+                                   planta == "Coro" ~ "5B",
+                                   planta == "Pasillo" ~ "6A",
+                                   T ~ as.character(planta))) %>%
+  separate(planta_bubble, 
+         into = c("piso", "planta_b"), 
+         sep = "(?<=[0-9])(?=[A-Za-z])",
+         remove = F) %>% 
+  mutate(piso = as.numeric(piso))
+
+
+
+```
+
+
+
+
+```{r, include=FALSE, warning=FALSE}
+#NUEVOS--------------------------------------------------------------------------------
+#aqui meto el limite
+nuevos <-  data_limpio %>% 
+  filter(semana_nuevos > limite)
+
+nuevos_tabla <- nuevos %>% 
+  select(germen, precauciones, tipo) %>% 
+  mutate(tipo = if_else(tipo == "Reingreso comunitaria", "Comunitaria", tipo)) %>% 
+  arrange(germen, precauciones) %>% 
+  tbl_summary(
+    by = tipo,
+    sort = list(
+    germen ~ "frequency",
+    precauciones ~ "frequency")) %>% 
+  bold_labels() %>% 
+  italicize_levels()
+
+nosocomiales_tabla_nuevos <- nuevos %>% 
+  filter(grepl("Nosocomial|Reingreso nosocomial|Incierto", tipo)) %>% 
+  select(cic, nombre, apellidos, germen, planta, habitacion_muestra, id_habitacion:idhab6) %>% 
+  arrange(germen, planta) %>% 
+  select(-planta) %>% 
+  datatable()
+```
+
+
+
+
+```{r, include=FALSE, warning=FALSE}
+#aqui preparar un listado para el anexo. Tengo que quitar varias columnas
+#view(nuevos)
+#INDICADOR DE NUEVAS APARICIONES..........................................
+l1 <-  Sys.Date()
+limite_indicador <- floor_date(l_1,
+                     unit = "week",
+                     week_start = 1) - 84
+  
+#STENOTROPHOMONAS MALTOPHILIA-----------------------------------
+indicador_marga_steno <- data_limpio %>% 
+  filter(semana_nuevos > limite_indicador & germen == "Stenotrophomonas maltophilia") %>% 
+  mutate(
+    semana_nuevos_letras = as.factor(semana_nuevos_letras),
+    semana_nuevos_letras = fct_reorder(semana_nuevos_letras, semana_nuevos, min)) %>% 
+  select(semana_nuevos_letras, planta, cic) %>% 
+  #mutate(germen = 1) %>% 
+  pivot_wider(names_from = semana_nuevos_letras, values_from = cic) %>% 
+  arrange(planta) %>% 
+  gt_tabla()
+
+#ENTEROBACTER------------------------
+indicador_marga_enterobac_previo <- data_limpio %>% 
+  filter(semana_nuevos > limite_indicador & germen == "Enterobacter productor de Carbapenemasas") %>% 
+  select(semana_nuevos, germen, cic, planta, semana_nuevos_letras)
+
+limite_bajo <- min(indicador_marga_enterobac_previo$semana_nuevos)
+limite_alto <- max(indicador_marga_enterobac_previo$semana_nuevos)
+
+tabla_limites <- data.frame(semana_nuevos = seq(as.Date(limite_bajo), as.Date(limite_alto), by="weeks"),
+                            germen = "Enterobacter productor de Carbapenemasas",
+                            cic = " ",
+                            planta = "HUC-SMP") %>% 
+  as_tibble() %>% 
+  mutate(semana_nuevos_letras = floor_date(semana_nuevos,
+                                           unit = "week",
+                                           week_start = 1),
+         
+         
+         semana_nuevos_letras_2 = floor_date(semana_nuevos,
+                                             unit = "week",
+                                             week_start = 1) + 6,
+         
+         semana_nuevos_letras = format( semana_nuevos_letras, "%d%b"),
+         semana_nuevos_letras_2 = format( semana_nuevos_letras_2, "%d%b")) %>% 
+  unite(col = "semana_nuevos_letras", c("semana_nuevos_letras", "semana_nuevos_letras_2"), sep = "/ ", remove = T)
+
+
+indicador_marga_enterobac <- rbind(indicador_marga_enterobac_previo, tabla_limites) %>% 
+  mutate(
+    semana_nuevos_letras = as.factor(semana_nuevos_letras),
+    semana_nuevos_letras = fct_reorder(semana_nuevos_letras, semana_nuevos, min)) %>% 
+  select(semana_nuevos_letras, planta, cic) %>% 
+  #lo ordeno previamente porque pivot_wide no respeta los factores, solo el orden de aparicion
+  #entonces las dos lineas previas de codigo sobrarian
+  arrange(semana_nuevos_letras) %>% 
+  #mutate(germen = 1) %>% 
+  pivot_wider(names_from = semana_nuevos_letras, values_from = cic) %>% 
+  arrange(planta) %>% 
+  gt_tabla()
+
+#PSEUDOMONAS-----------------------------------------
+indicador_marga_pseudomona_previo <- data_limpio %>% 
+  filter(semana_nuevos > limite_indicador) %>% 
+  filter(grepl("Pseudomonas", germen)) %>% 
+  select(semana_nuevos, germen, cic, planta, semana_nuevos_letras)
+limite_bajo <- min(indicador_marga_pseudomona_previo$semana_nuevos)
+limite_alto <- max(indicador_marga_pseudomona_previo$semana_nuevos)
+tabla_limites <- data.frame(semana_nuevos = seq(as.Date(limite_bajo), as.Date(limite_alto), by="weeks"),
+                            germen = "Pseudomonas",
+                            cic = " ",
+                            planta = "HUC-SMP") %>% 
+  as_tibble() %>% 
+  mutate(semana_nuevos_letras = floor_date(semana_nuevos,
+                                           unit = "week",
+                                           week_start = 1),
+         
+         
+         semana_nuevos_letras_2 = floor_date(semana_nuevos,
+                                             unit = "week",
+                                             week_start = 1) + 6,
+         
+         semana_nuevos_letras = format( semana_nuevos_letras, "%d%b"),
+         semana_nuevos_letras_2 = format( semana_nuevos_letras_2, "%d%b")) %>% 
+  unite(col = "semana_nuevos_letras", c("semana_nuevos_letras", "semana_nuevos_letras_2"), sep = "/ ", remove = T)
+
+
+indicador_marga_pseudomona <- rbind(indicador_marga_pseudomona_previo, tabla_limites) %>% 
+  mutate(
+    semana_nuevos_letras = as.factor(semana_nuevos_letras),
+    semana_nuevos_letras = fct_reorder(semana_nuevos_letras, semana_nuevos, min)) %>% 
+  select(semana_nuevos_letras, planta, cic) %>% 
+  #lo ordeno previamente porque pivot_wide no respeta los factores, solo el orden de aparicion
+  #entonces las dos lineas previas de codigo sobrarian
+  arrange(semana_nuevos_letras) %>% 
+  #mutate(germen = 1) %>% 
+  pivot_wider(names_from = semana_nuevos_letras, values_from = cic) %>% 
+  arrange(planta) %>% 
+  gt_tabla()
+
+
+#SARM-------------------------------------
+indicador_marga_sarm_previo <- data_limpio %>% 
+  filter(semana_nuevos > limite_indicador & germen == "SARM") %>% 
+  select(semana_nuevos, germen, cic, planta, semana_nuevos_letras)
+limite_bajo <- min(indicador_marga_sarm_previo$semana_nuevos)
+limite_alto <- max(indicador_marga_sarm_previo$semana_nuevos)
+tabla_limites <- data.frame(semana_nuevos = seq(as.Date(limite_bajo), as.Date(limite_alto), by="weeks"),
+                            germen = "SARM",
+                            cic = " ",
+                            planta = "HUC-SMP") %>% 
+  as_tibble() %>% 
+  mutate(semana_nuevos_letras = floor_date(semana_nuevos,
+                                           unit = "week",
+                                           week_start = 1),
+         
+         
+         
+         semana_nuevos_letras_2 = floor_date(semana_nuevos,
+                                             unit = "week",
+                                             week_start = 1) + 6,
+         
+         semana_nuevos_letras = format( semana_nuevos_letras, "%d%b"),
+         semana_nuevos_letras_2 = format( semana_nuevos_letras_2, "%d%b")) %>% 
+  unite(col = "semana_nuevos_letras", c("semana_nuevos_letras", "semana_nuevos_letras_2"), sep = "/ ", remove = T)
+
+
+indicador_marga_sarm <- rbind(indicador_marga_sarm_previo, tabla_limites) %>% 
+  mutate(
+    semana_nuevos_letras = as.factor(semana_nuevos_letras),
+    semana_nuevos_letras = fct_reorder(semana_nuevos_letras, semana_nuevos, min)) %>% 
+  select(semana_nuevos_letras, planta, cic) %>% 
+  #lo ordeno previamente porque pivot_wide no respeta los factores, solo el orden de aparicion
+  #entonces las dos lineas previas de codigo sobrarian
+  arrange(semana_nuevos_letras) %>% 
+  #mutate(germen = 1) %>% 
+  pivot_wider(names_from = semana_nuevos_letras, values_from = cic) %>% 
+  arrange(planta) %>% 
+  gt_tabla() 
+
+#ACTIVOS por tipo (nosocomial)-------------------------------------------------------------------------------
+activos <- data_limpio %>% 
+  filter(is.na(fecha_final_aisl)) %>% 
+  filter(is.na(fecha_de_alta)) %>% 
+  filter(aislamiento == 1) %>% 
+  select(-c(fecha_de_alta,id_destino_de_alta))
+
+activos_tabla <- activos %>% 
+  select(germen, precauciones, tipo) %>% 
+  arrange(germen, precauciones) %>% 
+  tbl_summary(
+    by = tipo,
+    sort = list(everything() ~ "frequency"),
+    statistic = all_categorical() ~ "{n}"
+  ) %>% 
+  bold_labels() %>% 
+  italicize_levels()
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+#ACTIVOS por PLANTAS--------------------------------------------------------
+
+plantas_criticas <- c("1E", "Pasillo", "GQx", "UCI", "Coro", "marti", "6D", "6E", "R1", "R2", "RA")
+
+activos_plantas <- data_limpio %>% 
+  filter(is.na(fecha_final_aisl)) %>% 
+  filter(is.na(fecha_de_alta)) %>% 
+  filter(aislamiento == 1) %>% 
+  select(-c(fecha_de_alta,id_destino_de_alta))
+
+activos_plantas_t <- activos_plantas %>% 
+  select(germen, precauciones, planta) %>% 
+  filter(planta %in% plantas_criticas) %>% 
+  arrange(germen, precauciones) %>% 
+  tbl_summary(
+    by = planta,
+    sort = list(everything() ~ "frequency"),
+    statistic = all_categorical() ~ "{n}"
+  ) %>% 
+  bold_labels() %>% 
+  italicize_levels()
+```
+
+
+
+
+
+```{r, include=FALSE, warning=FALSE}
+#FINALIZADOS-----------------------------------------------------------------------
+finalizados <- data_limpio %>% 
+  filter(semana_final_aislamiento > limite) 
+finalizados_tabla <- finalizados %>% 
+  select(fecha_final_aisl, germen, precauciones) %>% 
+  arrange(germen, precauciones) %>% 
+  tbl_summary(
+    sort = list(germen ~ "frequency",
+                precauciones ~ "frequency")) %>% 
+  bold_labels() %>% 
+  italicize_levels()
+
+#REVISAR
+habitas_por_mirar <- data_limpio %>%
+  filter(is.na(planta) & !is.na(id_habitacion) & semana_nuevos > "2022-01-01") %>% 
+  select(cic, habitacion_muestra_copia) %>% 
+  gt()
+
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+
+img <- readJPEG("cruces-gris.jpg")
+
+activos_bubble_ultimo <- activos %>% 
+  group_by(planta_b, piso) %>% 
+  summarise(
+    cuenta = n(),
+    .groups = 'drop')
+
+
+bubble_plot <- function(tbl) {
+  
+  tbl %>% 
+    ggplot(aes(x = planta_b, y = piso)) +
+    background_image(img) +
+    geom_point(
+      aes(fill = cuenta, size = cuenta), shape = 21
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = 'bottom',
+      text = element_text(color = 'grey40')
+    ) +
+    guides(
+      col = guide_none(),
+      size = guide_none(),
+      fill = guide_colorbar(
+        barheight = unit(0.5, 'cm'),
+        barwidth = unit(10, 'cm'),
+        title.position = 'top'
+      )
+    ) +
+    scale_size_area(max_size = 15) +
+    scale_color_viridis_b(
+      na.value = 'grey80'
+    ) +
+    scale_fill_viridis_c(option = "plasma",
+      na.value = 'grey80') +
+    
+    scale_y_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) 
+  
+  }
+
+
+ 
+activos_grafico <- activos_bubble_ultimo %>% 
+  bubble_plot() +
+  labs(title = "Aislamientos activos en Cruces",
+       subtitle = "",
+       x = element_blank(),
+       y = element_blank(),
+       fill = 'Gradiente de casos')  +                                  # simplify background
+  
+  theme(
+    legend.title = element_text(size=12, face="bold"),
+          
+    axis.title = element_text(size=12, face="bold"),  # axis title size and bold
+    
+    plot.title = element_text(hjust=0,size=14,face="bold"),  # title right-aligned, large, bold
+    plot.caption = element_text(hjust = 0, face = "italic"))    # caption right-aligned and italic 
+
+
+```
+
+
+
+
+
+# Nuevos aislamientos de los últimos 20 días
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+nuevos_tabla
+```
+
+\
+\
+\
+
+# Tabla de pacientes con aislamientos nosocomiales
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+nosocomiales_tabla_nuevos
+```
+
+\
+\
+\
+
+# Aislamientos activos
+
+## Clasificado por tipo de colonización
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+activos_tabla
+```
+
+\
+\
+
+## Clasificado por plantas críticas
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+activos_plantas_t
+```
+\
+\
+\
+
+```{r, fig.align="center", echo = FALSE, fig.width = 15, fig.height = 10}
+activos_grafico
+```
+\
+\
+\
+
+# Seguimiento Stenotrophomonas maltophilia
+
+Las plantas se han dividido de la siguiente manera: 
+      501-506 ~ "Pasillo",
+      512-516 ~ "GQx",
+      521-532 ~ "UCI",
+      538-545 ~ "Coro",
+      551-556 ~ "marti",
+      601-613 ~ "R1",
+      614-624 ~ "R2",
+      634-641 ~ "RA"
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indicador_marga_steno
+```
+
+\
+\
+\
+
+# Seguimiento Enterobacter 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indicador_marga_enterobac
+```
+
+\
+\
+\
+
+# Seguimiento Pseudomonas aeruginosa 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indicador_marga_pseudomona
+```
+
+\
+\
+\
+
+# Seguimiento SARM 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indicador_marga_sarm
+```
+
+\
+\
+\
+
+# Aislamientos finalizados en los últimos 20 días
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+finalizados_tabla
+```
+
+
+\
+\
+\
+
+# Revisar habitaciones
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+habitas_por_mirar
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#generar un excel para indicadores
+indicador_1_nosocomiales_nuevos <- nuevos %>% 
+  filter(tipo == "Nosocomial") %>% 
+  count(germen) %>% 
+  mutate(
+    germen = str_to_lower(germen),
+    indicador = "nuevo_nosocomial",
+    registro = Sys.Date(),
+    validez = weekdays(Sys.Date())) %>% 
+  print()
+
+indicador_2_nuevos_totales <- nuevos %>% 
+  count(germen) %>% 
+  mutate(
+    germen = str_to_lower(germen),
+    indicador = "nuevo_total",
+    registro = Sys.Date(),
+    validez = weekdays(Sys.Date())) %>% 
+  print()
+
+
+indicador_3_activos_nosocomiales <- activos_plantas %>% 
+  filter(tipo == "Nosocomial") %>% 
+  count(germen) %>% 
+  mutate(
+    germen = str_to_lower(germen),
+   indicador = "activo_nosocomial",
+    registro = Sys.Date(),
+    validez = weekdays(Sys.Date())) %>% 
+  print()
+
+indicador_4_activos_totales <- activos_plantas %>% 
+  #filter(tipo == "Nosocomial") %>% 
+  count(germen) %>% 
+  mutate(
+    germen = str_to_lower(germen),
+    indicador = "activo_total",
+    registro = Sys.Date(),
+    validez = weekdays(Sys.Date())) %>% 
+  print()
+
+
+indicador_5_plantas <- activos_plantas %>% 
+  count(germen, planta) %>% 
+  mutate(
+    germen = str_to_lower(germen),
+    indicador = paste0("activo_plantas_", planta),
+    registro = Sys.Date(),
+    validez = weekdays(Sys.Date())) %>% 
+  select(-planta) %>% 
+  print()
+
+
+importar <- bind_rows(list(indicador_1_nosocomiales_nuevos,
+            indicador_2_nuevos_totales,
+            indicador_3_activos_nosocomiales,
+            indicador_4_activos_totales,
+            indicador_5_plantas))
+
+registro <- import("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/Informes centinela/indicadores/indicadores.xlsx") %>% 
+  bind_rows(importar) %>% 
+  distinct() %>% 
+  filter(germen != "letras") %>% 
+  write_xlsx(., "S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/Informes centinela/indicadores/indicadores.xlsx")
+
+```
+
+# Carga de trabajo
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+limite_carga <- Sys.Date() - 21
+
+indicadores <- import("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS_DIARIO/admision/indicadores/indicadores_admision.xlsx") %>% 
+  as_tibble() %>% 
+  filter(germen == "todos",
+         indicador == "diario_pacientes") %>% 
+  rename(aislamientos = n) %>% 
+  filter(fecha >  limite_carga)
+
+
+los_dias_oas <- unique(indicadores$fecha) %>% 
+     str_replace(., "[UTC]", "") %>% 
+     paste0(., ".xlsx")
+
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS-TRAZABILIDAD")
+
+
+ldo <- los_dias_oas %>% 
+  map(.x = ., .f = import) %>% 
+  set_names(str_replace(los_dias_oas, ".xlsx", "")) %>% 
+  map(.x = ., .f = ~ as_tibble(.) %>% 
+        clean_names())
+
+ldo1 <- ldo %>% 
+  map(.x = ., .f = count) %>%  
+        bind_rows() %>% 
+  mutate(fecha = indicadores$fecha) %>% 
+  rename(total = n)
+
+ldo2 <- indicadores %>% 
+  left_join(ldo1, by = "fecha") %>%
+  mutate(per = aislamientos*100/total,
+         per = round(per, digits = 2),
+         per = paste0(per, "%")) %>% 
+  pivot_longer(
+    cols = c(aislamientos, total),
+    names_to = "tipo",
+    values_to = "n"
+  ) 
+
+
+
+grafico_indicador <-   ldo2 %>% 
+  ggplot(aes(x = fecha, y = n)) +
+  geom_line(aes(color = tipo, size = 1.5))+
+  #geom_smooth(aes(color = tipo, size = 1.5))+
+  geom_point(aes(size=2)) +
+  geom_text(aes(label = ifelse(tipo == "aislamientos", per, n)), nudge_y = 50)+
+  
+  ylim(0,800)+
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    title = "Carga de aislamientos diaria",
+    subtitle = "La línea superior indica el número de pacientes ingresados \nLa de abajo el número de pacientes con aislamiento",
+    y = "",
+    x = ""
+  )
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+grafico_indicador
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plantas_hospitalizacion <-  c("12",
+                              "1A", "1B", "1C", "1D", "1E",
+                              "2A", "2B", "2C", "2D", "2E", 
+                              "3A", "3B", "3C", "3D", "3E", 
+                              "4A", "4B", "4C", "4D", "4E") 
+
+
+
+indicadores <- import("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS_DIARIO/admision/indicadores/indicadores_admision.xlsx")%>%   as_tibble() %>% 
+  filter(germen == "todos",
+         indicador == "diario_pacientes") %>% 
+  rename(aislamientos = n) %>% 
+  filter(fecha >  limite_carga)
+
+
+los_dias_oas <- unique(indicadores$fecha) %>% 
+  str_replace(., "[UTC]", "") %>% 
+  paste0(., ".xlsx")
+
+setwd("S:/Medicina Preventiva/AISLAMIENTOS TRABAJADOS/RECEPCION AISLAMIENTOS/OAS-TRAZABILIDAD")
+
+ldo3 <- ldo %>% 
+  map(.x = ., .f = ~ as_tibble(.) %>% 
+        clean_names() %>% 
+        separate(unidad_enfermeria_uenf, 
+                 sep = "-", 
+                 into = c("a", "b"), 
+                 convert = T) %>% 
+        mutate(a = noquote(a)) %>% 
+        filter(a %ni% plantas_hospitalizacion,
+               a %ni% c("VACÍO", "2 QUIRÓFANO", "3A ", "3E PUÉRPERAS", "7C")) %>% 
+        count()) %>%  
+        bind_rows() %>% 
+  mutate(fecha = indicadores$fecha) %>% 
+  rename(total = n)
+
+
+ldo4 <- indicadores %>% 
+  left_join(ldo3, by = "fecha") %>%
+  mutate(per = aislamientos*100/total,
+         per = round(per, digits = 2),
+         per = paste0(per, "%")) %>% 
+  pivot_longer(
+    cols = c(aislamientos, total),
+    names_to = "tipo",
+    values_to = "n"
+  ) 
+
+
+
+grafico_indicador <-   ldo4 %>% 
+  ggplot(aes(x = fecha, y = n)) +
+  geom_line(aes(color = tipo, size = 1.5))+
+  #geom_smooth(aes(color = tipo, size = 1.5))+
+  geom_point(aes(size=2)) +
+  geom_text(aes(label = ifelse(tipo == "aislamientos", per, n)), nudge_y = 15)+
+  
+  ylim(0,250)+
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    title = "Carga de aislamientos diaria en unidades de críticos",
+    subtitle = "La línea superior indica el número de pacientes ingresados en unidades críticas \nLa de abajo el número de pacientes con aislamiento",
+    y = "",
+    x = ""
+  )
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+grafico_indicador
+```
+
+
+
+```{r, include=FALSE, warning=FALSE}
+
+RODBC::odbcClose(con)
+
+```
